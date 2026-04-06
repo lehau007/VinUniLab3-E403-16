@@ -7,6 +7,7 @@
 ---
 
 ## I. Technical Contribution (15 Points)
+([View: Commit history](./commit_src/2A202600333_TruongQuangLoc.png))
 
 **What I did:**
 1. **Flowchart Design** - Created ReAct loop flowchart with error handling, fallback paths, all tool execution states ([View: flowchart.png](../../flowchart.png))
