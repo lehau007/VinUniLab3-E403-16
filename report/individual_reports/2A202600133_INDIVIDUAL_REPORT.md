@@ -8,6 +8,8 @@
 
 ## I. Technical Contribution (15 Points)
 
+![Commit history](commit_src/2A202600133_NguyenBaHao.png)
+
 Phần đóng góp chính của tôi tập trung vào **thiết kế tool** và **tối ưu hóa prompt** cho hệ thống ReAct Agent.
 
 ### 1. Tạo và tối ưu Tools
