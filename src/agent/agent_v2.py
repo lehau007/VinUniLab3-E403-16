@@ -3,12 +3,11 @@ import re
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
+from src.agent.agent_v1 import ReActAgentV1
 from src.core.llm_provider import LLMProvider
 from src.telemetry.logger import logger
 from src.telemetry.metrics import tracker
 from src.tools.validator import ToolValidator
-
-from src.agent.agent_v1 import ReActAgentV1
 
 
 class ReActAgentV2(ReActAgentV1):
@@ -29,10 +28,7 @@ class ReActAgentV2(ReActAgentV1):
         trace_block = ""
         if self.failure_traces:
             formatted = "\n".join([f"- {t}" for t in self.failure_traces[:5]])
-            trace_block = (
-                "\nKnown failures from previous runs (avoid repeating these):\n"
-                f"{formatted}\n"
-            )
+            trace_block = f"\nKnown failures from previous runs (avoid repeating these):\n{formatted}\n"
 
         guardrails = (
             "\nAdditional guardrails (v2):\n"
@@ -50,66 +46,71 @@ class ReActAgentV2(ReActAgentV1):
         logger.log_event("AGENT_START", {"version": "v2", "input": user_input, "model": self.llm.model_name})
 
         scratchpad = ""
+        self.last_loop_trace = []
+        self.last_run_metrics = {
+            "total_latency_ms": 0,
+            "total_tokens": 0,
+            "loop_count": 0,
+            "parse_errors": 0,
+            "hallucinated_tools": 0,
+            "status": "success",
+        }
         action_counter: Dict[str, int] = defaultdict(int)
         parse_error_count = 0
         hallucinated_tool_count = 0
-        catalog_loaded = False
 
         for step in range(1, self.max_steps + 1):
-            # Guardrail: force catalog grounding for product-related requests when available.
-            if not catalog_loaded and "list_all_products" in self.tool_map:
-                forced_observation = self._execute_tool("list_all_products", {})
-                catalog_loaded = True
-                self.last_loop_trace.append(
-                    {
-                        "step": step,
-                        "status": "guardrail_forced_tool",
-                        "tool": "list_all_products",
-                        "args": {},
-                        "observation": forced_observation,
-                    }
-                )
-                scratchpad += (
-                    "\nLLM Output:\n"
-                    "Thought: I should ground on real inventory first.\n"
-                    "Action: list_all_products()\n"
-                    f"Observation: {forced_observation}\n"
-                )
-                logger.log_event(
-                    "AGENT_GUARDRAIL",
-                    {"version": "v2", "step": step, "type": "forced_catalog_load"},
-                )
-                continue
-
             llm_input = self._build_input(user_input, scratchpad)
             result = self.llm.generate(llm_input, system_prompt=self.get_system_prompt())
+
+            latency = result.get("latency_ms", 0)
+            tokens = result.get("usage", {}).get("total_tokens", 0)
+
+            self.last_run_metrics["total_latency_ms"] += latency
+            self.last_run_metrics["total_tokens"] += tokens
+            self.last_run_metrics["loop_count"] = step
+
             tracker.track_request(
                 provider=result.get("provider", "unknown"),
                 model=self.llm.model_name,
                 usage=result.get("usage", {}),
-                latency_ms=result.get("latency_ms", 0),
+                latency_ms=latency,
             )
             content = (result.get("content") or "").strip()
-            
+
             # Ngăn chặn LLM hallucination
-            obs_match = re.search(r'Observation:', content, flags=re.IGNORECASE)
+            obs_match = re.search(r"Observation:", content, flags=re.IGNORECASE)
             if obs_match:
-                content = content[:obs_match.start()].strip()
-                
+                content = content[: obs_match.start()].strip()
+
             logger.log_event("AGENT_STEP", {"version": "v2", "step": step, "llm_output": content})
+            thought, action_block = self._extract_thought_action(content)
+            step_trace: Dict[str, Any] = {
+                "step": step,
+                "llm_output": content,
+                "thought": thought,
+                "action": action_block,
+            }
 
             final_answer = self._extract_final_answer(content)
             if final_answer:
+                step_trace["status"] = "final_answer"
+                step_trace["final_answer"] = final_answer
+                self.last_loop_trace.append(step_trace)
                 logger.log_event("AGENT_END", {"version": "v2", "steps": step, "status": "final_answer"})
                 return final_answer
 
             tool_name, args_payload, parse_error = self._parse_action(content)
             if parse_error:
                 parse_error_count += 1
+                self.last_run_metrics["parse_errors"] = parse_error_count
                 observation = (
-                    "PARSER_ERROR: Could not parse action. "
-                    "Use format exactly: Action: tool_name(key='value')."
+                    "PARSER_ERROR: Could not parse action. Use format exactly: Action: tool_name(key='value')."
                 )
+                step_trace["status"] = "parse_error"
+                step_trace["parse_error"] = parse_error
+                step_trace["observation"] = observation
+                self.last_loop_trace.append(step_trace)
                 logger.log_event(
                     "AGENT_PARSE_ERROR",
                     {
@@ -121,7 +122,10 @@ class ReActAgentV2(ReActAgentV1):
                 )
                 scratchpad += f"\nLLM Output:\n{content}\nObservation: {observation}\n"
                 if parse_error_count >= 2:
-                    return "I am stopping to avoid repeated parser errors. Please rephrase your request more specifically."
+                    self.last_run_metrics["status"] = "stopped_parse_error"
+                    return (
+                        "I am stopping to avoid repeated parser errors. Please rephrase your request more specifically."
+                    )
                 continue
 
             signature = self._action_signature(tool_name, args_payload)
@@ -131,11 +135,19 @@ class ReActAgentV2(ReActAgentV1):
                     "AGENT_LOOP_GUARD",
                     {"version": "v2", "step": step, "signature": signature, "count": action_counter[signature]},
                 )
+                self.last_run_metrics["status"] = "stopped_loop_guard"
                 return "I detected a repeated reasoning loop. Please confirm the exact product you want."
 
             if tool_name not in self.tool_map:
                 hallucinated_tool_count += 1
+                self.last_run_metrics["hallucinated_tools"] = hallucinated_tool_count
                 observation = json.dumps({"error": "hallucinated_tool", "tool": tool_name}, ensure_ascii=False)
+
+                step_trace["status"] = "hallucinated_tool"
+                step_trace["tool"] = tool_name
+                step_trace["observation"] = observation
+                self.last_loop_trace.append(step_trace)
+
                 logger.log_event(
                     "AGENT_HALLUCINATED_TOOL",
                     {
@@ -147,16 +159,14 @@ class ReActAgentV2(ReActAgentV1):
                 )
                 scratchpad += f"\nLLM Output:\n{content}\nObservation: {observation}\n"
                 if hallucinated_tool_count >= 2:
+                    self.last_run_metrics["status"] = "stopped_hallucinated_tool"
                     return "I cannot continue because requested tools are unavailable. Please clarify your request."
                 continue
 
             # Validate tool arguments before execution
             is_valid, error_msg, validated_args = ToolValidator.validate(tool_name, args_payload)
             if not is_valid:
-                observation = json.dumps(
-                    {"error": "invalid_arguments", "message": error_msg},
-                    ensure_ascii=False
-                )
+                observation = json.dumps({"error": "invalid_arguments", "message": error_msg}, ensure_ascii=False)
                 logger.log_event(
                     "AGENT_VALIDATION_ERROR",
                     {
@@ -170,6 +180,13 @@ class ReActAgentV2(ReActAgentV1):
                 continue
 
             observation = self._execute_tool(tool_name, validated_args)
+            observation = self._execute_tool(tool_name, args_payload)
+            step_trace["status"] = "tool_call"
+            step_trace["tool"] = tool_name
+            step_trace["args"] = args_payload
+            step_trace["observation"] = observation
+            self.last_loop_trace.append(step_trace)
+
             logger.log_event(
                 "AGENT_TOOL_CALL",
                 {
@@ -183,6 +200,7 @@ class ReActAgentV2(ReActAgentV1):
             scratchpad += f"\nLLM Output:\n{content}\nObservation: {observation}\n"
 
         logger.log_event("AGENT_END", {"version": "v2", "steps": self.max_steps, "status": "max_steps"})
+        self.last_run_metrics["status"] = "max_steps"
         return "I could not complete this request in the allowed number of steps."
 
     def _action_signature(self, tool_name: Optional[str], args_payload: Any) -> str:

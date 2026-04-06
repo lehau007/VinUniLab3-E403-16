@@ -29,3 +29,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.venv/
+.pytest_cache/
+pytest.ini

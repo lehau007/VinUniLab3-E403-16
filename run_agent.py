@@ -95,6 +95,10 @@ def run_once_with_trace(
                     "llm_output": answer,
                 }
             ],
+            "metrics": {
+                "status": "success",
+                "loop_count": 1
+            }
         }
 
     repo = build_repository(backend=backend)
@@ -106,14 +110,16 @@ def run_once_with_trace(
         agent.get_system_prompt = lambda: formatted
         answer = agent.run(user_input)
         reasoning: List[Dict[str, Any]] = getattr(agent, "last_loop_trace", [])
-        return {"answer": answer, "reasoning": reasoning}
+        metrics: Dict[str, Any] = getattr(agent, "last_run_metrics", {})
+        return {"answer": answer, "reasoning": reasoning, "metrics": metrics}
 
     formatted = _format_prompt(AGENT_V2_SYSTEM_PROMPT, tools)
     agent = ReActAgentV2(llm=llm, tools=tools, max_steps=max_steps)
     agent.get_system_prompt = lambda: formatted
     answer = agent.run(user_input)
     reasoning = getattr(agent, "last_loop_trace", [])
-    return {"answer": answer, "reasoning": reasoning}
+    metrics = getattr(agent, "last_run_metrics", {})
+    return {"answer": answer, "reasoning": reasoning, "metrics": metrics}
 
 
 def main() -> None:

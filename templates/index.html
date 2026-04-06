@@ -31,6 +31,7 @@
             <option value="chatbot">chatbot</option>
             <option value="v1">v1</option>
             <option value="v2" selected>v2</option>
+            <option value="compare">compare v1 & v2</option>
           </select>
         </label>
 
@@ -57,12 +58,23 @@
         </label>
 
         <label class="model-input">
-          Model (optional)
-          <input id="modelInput" type="text" placeholder="leave blank to use DEFAULT_MODEL" />
+          Model
+          <select id="modelSelect">
+            <!-- Options will be populated by JS -->
+          </select>
         </label>
       </section>
 
       <section id="chatWindow" class="chat-window glass" aria-live="polite"></section>
+
+      <div class="suggestions-wrapper" id="suggestionsWrapper">
+        <span class="suggestions-label">Try asking:</span>
+        <div class="suggestions-list" id="suggestionsList">
+          <button type="button" class="suggestion-chip">Mua 2 laptop gửi đến HN kèm mã SAVE10</button>
+          <button type="button" class="suggestion-chip">Tôi muốn mua mẫu điện thoại iPhone</button>
+          <button type="button" class="suggestion-chip">Can you check stock for laptop?</button>
+        </div>
+      </div>
 
       <form id="chatForm" class="composer glass">
         <textarea
