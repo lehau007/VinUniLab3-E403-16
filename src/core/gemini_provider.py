@@ -1,8 +1,10 @@
-import os
 import time
+from typing import Any, Dict, Generator, Optional
+
 import google.generativeai as genai
-from typing import Dict, Any, Optional, Generator
-from src.core.llm_provider import LLMProvider
+
+from core.llm_provider import LLMProvider
+
 
 class GeminiProvider(LLMProvider):
     def __init__(self, model_name: str = "gemini-1.5-flash", api_key: Optional[str] = None):
@@ -12,7 +14,7 @@ class GeminiProvider(LLMProvider):
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> Dict[str, Any]:
         start_time = time.time()
-        
+
         # In Gemini, system instruction is passed during model initialization or as a prefix
         # For simplicity in this lab, we'll prepend it if provided
         full_prompt = prompt
@@ -29,15 +31,10 @@ class GeminiProvider(LLMProvider):
         usage = {
             "prompt_tokens": response.usage_metadata.prompt_token_count,
             "completion_tokens": response.usage_metadata.candidates_token_count,
-            "total_tokens": response.usage_metadata.total_token_count
+            "total_tokens": response.usage_metadata.total_token_count,
         }
 
-        return {
-            "content": content,
-            "usage": usage,
-            "latency_ms": latency_ms,
-            "provider": "google"
-        }
+        return {"content": content, "usage": usage, "latency_ms": latency_ms, "provider": "google"}
 
     def stream(self, prompt: str, system_prompt: Optional[str] = None) -> Generator[str, None, None]:
         full_prompt = prompt
