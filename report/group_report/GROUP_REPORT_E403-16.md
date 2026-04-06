@@ -1,7 +1,7 @@
 # Group Report: Lab 3 - Production-Grade Agentic System
 
 - **Team Name**: E403-16
-- **Team Members**: Lê Văn Hậu (2A202600110), Nguyễn Bá Hào (2A202600133)
+- **Team Members**: Lê Văn Hậu (2A202600110), Nguyễn Bá Hào (2A202600133), Trương Quang Lộc(2A202600333),  Ngô Anh Tú (2A202600128)
 - **Deployment Date**: 2026-04-06
 
 ---
