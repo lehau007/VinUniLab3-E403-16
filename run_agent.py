@@ -19,6 +19,14 @@ from src.prompts.system_prompts import (
 from src.tools.registry import build_repository, create_tool_registry
 
 
+def _format_prompt(template: str, tools: List[Dict[str, Any]]) -> str:
+    """Inject tool descriptions into prompt template's {tool_descriptions} placeholder."""
+    tool_descriptions = "\n".join(
+        [f"- {t['name']}: {t['description']}" for t in tools]
+    )
+    return template.format(tool_descriptions=tool_descriptions)
+
+
 def build_provider(provider_name: str, model_name: Optional[str] = None) -> LLMProvider:
     provider = provider_name.strip().lower()
 
@@ -58,14 +66,14 @@ def run_once(mode: str, llm: LLMProvider, user_input: str, backend: str, max_ste
     tools = create_tool_registry(repo=repo)
 
     if mode == "v1":
+        formatted = _format_prompt(AGENT_V1_SYSTEM_PROMPT, tools)
         agent = ReActAgentV1(llm=llm, tools=tools, max_steps=max_steps)
-        # Keep v1 prompt concise and baseline.
-        agent.get_system_prompt = lambda: AGENT_V1_SYSTEM_PROMPT + "\n\n" + agent.__class__.get_system_prompt(agent)
+        agent.get_system_prompt = lambda: formatted
         return agent.run(user_input)
 
+    formatted = _format_prompt(AGENT_V2_SYSTEM_PROMPT, tools)
     agent = ReActAgentV2(llm=llm, tools=tools, max_steps=max_steps)
-    # v2 prompt includes stricter rules and keeps inherited failure-aware guardrails.
-    agent.get_system_prompt = lambda: AGENT_V2_SYSTEM_PROMPT + "\n\n" + agent.__class__.get_system_prompt(agent)
+    agent.get_system_prompt = lambda: formatted
     return agent.run(user_input)
 
 
@@ -93,14 +101,16 @@ def run_once_with_trace(
     tools = create_tool_registry(repo=repo)
 
     if mode == "v1":
+        formatted = _format_prompt(AGENT_V1_SYSTEM_PROMPT, tools)
         agent = ReActAgentV1(llm=llm, tools=tools, max_steps=max_steps)
-        agent.get_system_prompt = lambda: AGENT_V1_SYSTEM_PROMPT + "\n\n" + agent.__class__.get_system_prompt(agent)
+        agent.get_system_prompt = lambda: formatted
         answer = agent.run(user_input)
         reasoning: List[Dict[str, Any]] = getattr(agent, "last_loop_trace", [])
         return {"answer": answer, "reasoning": reasoning}
 
+    formatted = _format_prompt(AGENT_V2_SYSTEM_PROMPT, tools)
     agent = ReActAgentV2(llm=llm, tools=tools, max_steps=max_steps)
-    agent.get_system_prompt = lambda: AGENT_V2_SYSTEM_PROMPT + "\n\n" + agent.__class__.get_system_prompt(agent)
+    agent.get_system_prompt = lambda: formatted
     answer = agent.run(user_input)
     reasoning = getattr(agent, "last_loop_trace", [])
     return {"answer": answer, "reasoning": reasoning}

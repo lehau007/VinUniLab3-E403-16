@@ -3,8 +3,14 @@ from typing import Any, Dict, List, Optional
 
 from src.repositories.json_repo import JsonShopRepository
 from src.repositories.sqlite_repo import SqliteShopRepository
-from src.tools.catalog_tools import check_stock, check_stock_by_id, list_all_products
-from src.tools.pricing_tools import get_discount
+from src.tools.catalog_tools import (
+    check_stock,
+    check_stock_by_id,
+    compare_products,
+    list_all_products,
+    search_products,
+)
+from src.tools.pricing_tools import get_discount, list_coupons
 from src.tools.shipping_tools import calc_shipping
 
 
@@ -69,45 +75,97 @@ def create_tool_registry(repo: Any) -> List[Dict[str, Any]]:
         }
 
     return [
+        # ── Discovery tools ──────────────────────────────────────────
         {
             "name": "list_all_products",
             "description": (
-                "Return only product id and name for discovery/search. "
-                "Use this first to map user description to a product id. "
-                "Do not use this tool for detailed product info."
+                "List all products with id, name, price, and stock. "
+                "Call this FIRST to discover product names and IDs. "
+                "Args: none."
             ),
             "fn": lambda: list_all_products(repo=repo),
         },
         {
+            "name": "search_products",
+            "description": (
+                "Search products by keyword (case-insensitive partial match). "
+                "Returns matching products with id, name, price, stock. "
+                "Args: keyword (str)."
+            ),
+            "fn": lambda keyword: search_products(keyword=keyword, repo=repo),
+        },
+        # ── Product detail tools ─────────────────────────────────────
+        {
+            "name": "get_product_by_id",
+            "description": (
+                "Return full product details (name, price, stock, weight) by product ID. "
+                "Use after finding the ID from list_all_products or search_products. "
+                "Args: product_id (str)."
+            ),
+            "fn": get_product,
+        },
+        {
+            "name": "compare_products",
+            "description": (
+                "Compare two products side-by-side by their IDs. "
+                "Returns both products' details and price difference. "
+                "Args: product_id_1 (str), product_id_2 (str)."
+            ),
+            "fn": lambda product_id_1, product_id_2: compare_products(
+                product_id_1=product_id_1, product_id_2=product_id_2, repo=repo
+            ),
+        },
+        # ── Stock tools ──────────────────────────────────────────────
+        {
             "name": "check_stock",
-            "description": "Check stock by exact product name and return product id if found.",
+            "description": (
+                "Check product stock by exact product name (case-insensitive). "
+                "Args: item_name (str)."
+            ),
             "fn": lambda item_name: check_stock(item_name=item_name, repo=repo),
         },
         {
             "name": "check_stock_by_id",
-            "description": "Check stock by product id. Prefer this after selecting product from list_all_products.",
+            "description": (
+                "Check product stock by product ID. "
+                "Prefer this after finding the ID from list_all_products. "
+                "Args: product_id (str)."
+            ),
             "fn": lambda product_id: check_stock_by_id(product_id=product_id, repo=repo),
         },
+        # ── Pricing / coupon tools ───────────────────────────────────
         {
-            "name": "get_product_by_id",
-            "description": "Return full product details by product id after product selection.",
-            "fn": get_product,
+            "name": "list_coupons",
+            "description": (
+                "List all available coupon codes and their discount percentages. "
+                "Args: none."
+            ),
+            "fn": lambda: list_coupons(repo=repo),
         },
         {
             "name": "get_discount",
-            "description": "Return discount percent for coupon code.",
+            "description": (
+                "Validate a coupon code and return its discount percentage. "
+                "Returns 0% if coupon is not found. "
+                "Args: coupon_code (str)."
+            ),
             "fn": lambda coupon_code: get_discount(coupon_code=coupon_code, repo=repo),
         },
+        # ── Shipping & order tools ───────────────────────────────────
         {
             "name": "calc_shipping",
-            "description": "Calculate shipping fee from package weight and destination.",
+            "description": (
+                "Calculate shipping fee from package weight (kg) and destination city. "
+                "Surcharge applies for HCM (+20%), Da Nang/Hai Phong (+10%), Can Tho (+15%). "
+                "Args: weight (float), destination (str)."
+            ),
             "fn": calc_shipping,
         },
         {
             "name": "estimate_total",
             "description": (
-                "Estimate final order total by product id, quantity, optional coupon code, and destination. "
-                "Includes subtotal, discount, shipping, and total."
+                "Estimate full order total: subtotal, discount, shipping, and grand total. "
+                "Args: product_id (str), quantity (int), coupon_code (str, optional), destination (str, optional, default='hanoi')."
             ),
             "fn": estimate_total,
         },
