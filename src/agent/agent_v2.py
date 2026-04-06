@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from src.core.llm_provider import LLMProvider
 from src.telemetry.logger import logger
 from src.telemetry.metrics import tracker
+from src.tools.validator import ToolValidator
 
 from src.agent.agent_v1 import ReActAgentV1
 
@@ -149,7 +150,26 @@ class ReActAgentV2(ReActAgentV1):
                     return "I cannot continue because requested tools are unavailable. Please clarify your request."
                 continue
 
-            observation = self._execute_tool(tool_name, args_payload)
+            # Validate tool arguments before execution
+            is_valid, error_msg, validated_args = ToolValidator.validate(tool_name, args_payload)
+            if not is_valid:
+                observation = json.dumps(
+                    {"error": "invalid_arguments", "message": error_msg},
+                    ensure_ascii=False
+                )
+                logger.log_event(
+                    "AGENT_VALIDATION_ERROR",
+                    {
+                        "version": "v2",
+                        "step": step,
+                        "tool": tool_name,
+                        "error": error_msg,
+                    },
+                )
+                scratchpad += f"\nLLM Output:\n{content}\nObservation: {observation}\n"
+                continue
+
+            observation = self._execute_tool(tool_name, validated_args)
             logger.log_event(
                 "AGENT_TOOL_CALL",
                 {

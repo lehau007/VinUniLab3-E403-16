@@ -137,6 +137,24 @@ class ReActAgentV1:
         cleaned = re.sub(r"\s*```$", "", cleaned)
         return cleaned.strip()
 
+    def _attempt_syntax_fix(self, action_text: str) -> str:
+        """
+        Attempt to fix common syntax errors in action text.
+        
+        Fixes:
+        - Missing closing parentheses
+        - Unmatched quotes in arguments
+        """
+        fixed = action_text.strip()
+        
+        # Fix missing closing parentheses
+        open_parens = fixed.count('(')
+        close_parens = fixed.count(')')
+        if open_parens > close_parens:
+            fixed += ')' * (open_parens - close_parens)
+        
+        return fixed
+
     def _parse_action(self, text: str) -> Tuple[Optional[str], Any, Optional[str]]:
         cleaned = self._strip_code_fences(text)
 
@@ -157,6 +175,8 @@ class ReActAgentV1:
         actions = re.findall(r"Action\s*:\s*(.+)", cleaned, flags=re.IGNORECASE)
         if actions:
             action_text = actions[-1].strip()
+            # Attempt to fix common syntax errors before parsing
+            action_text = self._attempt_syntax_fix(action_text)
             m = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$", action_text, flags=re.DOTALL)
             if not m:
                 return None, None, f"Invalid action format: {action_text}"
