@@ -32,6 +32,7 @@ My contribution scope was focused on data layer and core agent implementation on
   - Tools are backend-agnostic through `build_repository(...)` and `create_tool_registry(...)`.
   - Agent logic consumes tools from registry and executes `Thought -> Action -> Observation` until `Final Answer` or `max_steps`.
 
+([View: Commit history](./commit_src/2A202600110_LeVanHau_commits.png))
 ---
 
 ## II. Debugging Case Study (10 Points)
