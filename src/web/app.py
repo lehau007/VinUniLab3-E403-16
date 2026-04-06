@@ -34,6 +34,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     answer: str
     reasoning: List[Dict[str, Any]] = Field(default_factory=list)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
 
 
 def _get_or_build_provider(provider: str, model: str):
@@ -70,7 +71,11 @@ def chat(payload: ChatRequest):
             backend=payload.backend,
             max_steps=payload.max_steps,
         )
-        return ChatResponse(answer=result.get("answer", ""), reasoning=result.get("reasoning", []))
+        return ChatResponse(
+            answer=result.get("answer", ""), 
+            reasoning=result.get("reasoning", []),
+            metrics=result.get("metrics", {})
+        )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

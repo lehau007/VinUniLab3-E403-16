@@ -46,15 +46,31 @@ class ReActAgentV1:
         logger.log_event("AGENT_START", {"version": "v1", "input": user_input, "model": self.llm.model_name})
 
         self.last_loop_trace = []
+        self.last_run_metrics = {
+            "total_latency_ms": 0,
+            "total_tokens": 0,
+            "loop_count": 0,
+            "parse_errors": 0,
+            "hallucinated_tools": 0,
+            "status": "success",
+        }
         scratchpad = ""
         for step in range(1, self.max_steps + 1):
             llm_input = self._build_input(user_input, scratchpad)
             result = self.llm.generate(llm_input, system_prompt=self.get_system_prompt())
+            
+            latency = result.get("latency_ms", 0)
+            tokens = result.get("usage", {}).get("total_tokens", 0)
+            
+            self.last_run_metrics["total_latency_ms"] += latency
+            self.last_run_metrics["total_tokens"] += tokens
+            self.last_run_metrics["loop_count"] = step
+
             tracker.track_request(
                 provider=result.get("provider", "unknown"),
                 model=self.llm.model_name,
                 usage=result.get("usage", {}),
-                latency_ms=result.get("latency_ms", 0),
+                latency_ms=latency,
             )
 
             content = (result.get("content") or "").strip()
@@ -64,9 +80,13 @@ class ReActAgentV1:
                 content = content[:obs_match.start()].strip()
 
             logger.log_event("AGENT_STEP", {"version": "v1", "step": step, "llm_output": content})
+            thought, action_block = self._extract_thought_action(content)
+            
             step_trace: Dict[str, Any] = {
                 "step": step,
                 "llm_output": content,
+                "thought": thought,
+                "action": action_block,
             }
 
             final_answer = self._extract_final_answer(content)
@@ -79,6 +99,7 @@ class ReActAgentV1:
 
             tool_name, args_payload, parse_error = self._parse_action(content)
             if parse_error:
+                self.last_run_metrics["parse_errors"] += 1
                 observation = f"PARSER_ERROR: {parse_error}. Use exact format Action: tool_name(args)."
                 step_trace["status"] = "parse_error"
                 step_trace["parse_error"] = parse_error
@@ -92,6 +113,9 @@ class ReActAgentV1:
                 continue
 
             observation = self._execute_tool(tool_name, args_payload)
+            if "hallucinated_tool" in observation:
+                self.last_run_metrics["hallucinated_tools"] += 1
+                
             step_trace["status"] = "tool_call"
             step_trace["tool"] = tool_name
             step_trace["args"] = args_payload
@@ -110,6 +134,7 @@ class ReActAgentV1:
             scratchpad += f"\nLLM Output:\n{content}\nObservation: {observation}\n"
 
         timeout_answer = "I could not complete this request within max_steps. Please clarify your request."
+        self.last_run_metrics["status"] = "max_steps"
         self.last_loop_trace.append(
             {
                 "step": self.max_steps,
@@ -124,6 +149,22 @@ class ReActAgentV1:
         if not scratchpad:
             return f"User Question: {user_input}"
         return f"User Question: {user_input}\n\nContext from previous steps:\n{scratchpad}"
+
+    def _extract_thought_action(self, content: str) -> Tuple[str, str]:
+        thought, action = "", ""
+        thought_match = re.search(r"Thought\s*:\s*(.*?)(?:Action\s*:|Final\s*Answer\s*:|$)", content, flags=re.IGNORECASE | re.DOTALL)
+        if thought_match:
+            thought = thought_match.group(1).strip()
+            
+        action_match = re.search(r"(Action\s*:.*?)(?:Thought\s*:|Final\s*Answer\s*:|Observation\s*:|$)", content, flags=re.IGNORECASE | re.DOTALL)
+        if action_match:
+             action = action_match.group(1).strip()
+             
+        # Fallback if no specific tags found
+        if not thought and not action and content:
+            thought = content.strip()
+             
+        return thought, action
 
     def _extract_final_answer(self, text: str) -> Optional[str]:
         match = re.search(r"Final\s*Answer\s*:\s*(.+)", text, flags=re.IGNORECASE | re.DOTALL)
